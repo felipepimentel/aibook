@@ -2,9 +2,11 @@ mod ai_provider;
 mod cli;
 mod epub_handler;
 
+use ai_provider::{summarize_with_openrouter, summarize_with_stackspot};
 use clap::Parser;
 use cli::{AIProvider, Cli, Commands, Language};
 use dotenv::dotenv;
+use epub_handler::{create_epub, extract_images_from_epub, extract_text_from_epub};
 use eyre::{Result, WrapErr};
 use indicatif::{ProgressBar, ProgressStyle};
 use log::warn;
@@ -81,17 +83,13 @@ async fn main() -> Result<()> {
             if !state.images_extracted {
                 println!("Extracting images...");
                 std::fs::create_dir_all(&output_dir.join("images"))?;
-                epub_handler::extract_images_from_epub(
-                    &file,
-                    output_dir.join("images").to_str().unwrap(),
-                )?;
+                extract_images_from_epub(&file, output_dir.join("images").to_str().unwrap())?;
                 state.images_extracted = true;
                 save_state(&state, &state_file)?;
             }
 
             let chapters = if !state.text_extracted {
-                println!("Extracting text...");
-                let chapters = epub_handler::extract_text_from_epub(&file)?;
+                let chapters = extract_text_from_epub(&file)?;
                 if chapters.is_empty() {
                     println!("No chapters found in the EPUB.");
                     return Ok(());
@@ -129,16 +127,12 @@ async fn main() -> Result<()> {
                     pb.inc(1);
                     continue;
                 }
-                pb.set_message(format!("Processing chapter {}", i + 1));
+                pb.set_message("Processing chapters...");
+                pb.set_position(i as u64 + 1);
 
                 let summary = match ai_provider {
-                    "stackspot" => {
-                        ai_provider::summarize_with_stackspot(&api_key, chapter, &lang_code).await?
-                    }
-                    _ => {
-                        ai_provider::summarize_with_openrouter(&api_key, chapter, &lang_code)
-                            .await?
-                    }
+                    "stackspot" => summarize_with_stackspot(&api_key, chapter, &lang_code).await?,
+                    _ => summarize_with_openrouter(&api_key, chapter, &lang_code).await?,
                 };
                 writeln!(
                     md_file,
@@ -161,7 +155,7 @@ async fn main() -> Result<()> {
 
             if !state.epub_created {
                 println!("Creating EPUB...");
-                epub_handler::create_epub(&output_dir, &md_path)?;
+                create_epub(&output_dir, &md_path)?;
                 state.epub_created = true;
                 save_state(&state, &state_file)?;
             }
