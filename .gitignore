@@ -23,3 +23,5 @@ book2test.epub
 .env
 target
 book2test
+
+output/

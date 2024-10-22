@@ -1,201 +1,236 @@
-mod ai_provider;
-mod cli;
-mod epub_handler;
-
-use ai_provider::{summarize_with_openrouter, summarize_with_stackspot};
 use clap::Parser;
-use cli::{AIProvider, Cli, Commands, Language};
 use dotenv::dotenv;
-use epub_handler::{create_epub, extract_images_from_epub, extract_text_from_epub};
-use eyre::{Result, WrapErr};
+use env_logger::Env;
 use indicatif::{ProgressBar, ProgressStyle};
-use log::warn;
-use serde::{Deserialize, Serialize};
+use log::{error, info};
 use std::env;
-use std::fs::{self, File};
-use std::io::Write;
-use std::path::Path;
+use std::fs;
+use std::path::PathBuf;
 
-#[derive(Serialize, Deserialize)]
-struct ProcessingState {
-    images_extracted: bool,
-    text_extracted: bool,
-    chapters_processed: Vec<usize>,
-    epub_created: bool,
-}
+mod ebook;
+mod llm;
+mod output;
+mod summarizer;
 
-impl ProcessingState {
-    fn new() -> Self {
-        ProcessingState {
-            images_extracted: false,
-            text_extracted: false,
-            chapters_processed: Vec::new(),
-            epub_created: false,
-        }
-    }
+/// Command-line arguments structure
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Path(s) to the EPUB file(s)
+    #[arg(short, long)]
+    input: Vec<PathBuf>,
+
+    /// Output directory
+    #[arg(short, long)]
+    output_dir: Option<PathBuf>,
+
+    /// API key for OpenRouter (optional, can use environment variable)
+    #[arg(short, long)]
+    api_key: Option<String>,
+
+    /// Model to be used (optional, can use environment variable)
+    #[arg(long)]
+    model: Option<String>,
+
+    /// Output language (optional, can use environment variable)
+    #[arg(long)]
+    language: Option<String>,
+
+    /// Detail level of the summary (short, medium, long)
+    #[arg(long, default_value = "medium")]
+    detail_level: String,
+
+    /// Output format (markdown, html)
+    #[arg(long, default_value = "markdown")]
+    output_format: String,
+
+    /// Verbosity level
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    verbose: u8,
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> anyhow::Result<()> {
     dotenv().ok();
+    let args = Args::parse();
 
-    let cli = Cli::parse();
+    // Configure logging
+    let log_level = match args.verbose {
+        0 => "warn",
+        1 => "info",
+        _ => "debug",
+    };
+    env_logger::Builder::from_env(Env::default().default_filter_or(log_level)).init();
 
-    let default_lang = env::var("DEFAULT_LANGUAGE").unwrap_or_else(|_| {
-        warn!("DEFAULT_LANGUAGE environment variable is not set. Falling back to default 'pt'.");
-        "pt".to_string()
-    });
-    let default_ai_provider = env::var("AI_PROVIDER").unwrap_or_else(|_| "openrouter".to_string());
+    // Get the API key from environment variable or argument
+    let api_key = args
+        .api_key
+        .or_else(|| env::var("OPENROUTER_API_KEY").ok())
+        .expect("API key not provided");
 
-    match cli.command {
-        Commands::Process { file, lang } => {
-            validate_file_path(&file)?;
+    // Get the model name from environment variable or argument
+    let model_name = args
+        .model
+        .or_else(|| env::var("MODEL_NAME").ok())
+        .unwrap_or_else(|| "openai/gpt-3.5-turbo".to_string());
 
-            let api_key = env::var("API_KEY").wrap_err("Failed to retrieve API_KEY from .env")?;
+    // Get the output language from environment variable or argument
+    let output_language = args
+        .language
+        .or_else(|| env::var("OUTPUT_LANGUAGE").ok())
+        .unwrap_or_else(|| "en".to_string());
 
-            let lang_code = get_lang_code(lang, &default_lang);
-            let ai_provider = get_ai_provider(None, &default_ai_provider);
-
-            let book_name = Path::new(&file)
-                .file_stem()
-                .ok_or_else(|| eyre::eyre!("Failed to extract book name from file path"))?
-                .to_string_lossy()
-                .to_string();
-            let sanitized_book_name = sanitize_filename::sanitize(&book_name);
-
-            if sanitized_book_name.is_empty() {
-                return Err(eyre::eyre!(
-                    "Sanitized book name is empty or malformed. Please provide a valid file name."
-                ));
+    // Process multiple e-books
+    for input_path in &args.input {
+        // Determine the output directory for each e-book
+        let output_dir = match &args.output_dir {
+            Some(path) => path.clone(),
+            None => {
+                let default_output = PathBuf::from("output");
+                default_output
             }
+        };
+        // Create a unique directory for each e-book based on its filename
+        let ebook_stem = input_path
+            .file_stem()
+            .unwrap_or_else(|| input_path.as_os_str())
+            .to_string_lossy();
+        let ebook_output_dir = output_dir.join(ebook_stem.to_string());
 
-            let output_dir = Path::new(&sanitized_book_name);
-            std::fs::create_dir_all(&output_dir)?;
+        // Create the output directory and images subdirectory
+        fs::create_dir_all(&ebook_output_dir)?;
+        let images_dir = ebook_output_dir.join("images");
+        fs::create_dir_all(&images_dir)?;
 
-            let state_file = output_dir.join("processing_state.json");
-            let mut state = if state_file.exists() {
-                let state_json = fs::read_to_string(&state_file)?;
-                serde_json::from_str(&state_json)?
-            } else {
-                ProcessingState::new()
-            };
+        // Read the e-book and get chapters
+        let (doc, chapters) = ebook::read_ebook(&input_path, &images_dir)?;
+        info!("E-book '{}' read successfully.", input_path.display());
 
-            if !state.images_extracted {
-                println!("Extracting images...");
-                std::fs::create_dir_all(&output_dir.join("images"))?;
-                extract_images_from_epub(&file, output_dir.join("images").to_str().unwrap())?;
-                state.images_extracted = true;
-                save_state(&state, &state_file)?;
-            }
+        // Extract the table of contents
+        let toc = ebook::extract_table_of_contents(&doc);
 
-            let chapters = if !state.text_extracted {
-                let chapters = extract_text_from_epub(&file)?;
-                if chapters.is_empty() {
-                    println!("No chapters found in the EPUB.");
-                    return Ok(());
+        // Initialize the summarizer client
+        let summarizer = summarizer::Summarizer::new(
+            api_key.clone(),
+            model_name.clone(),
+            output_language.clone(),
+            args.detail_level.clone(),
+        );
+
+        // Generate the summary plan
+        println!("Generating summary plan...");
+        let plan = summarizer.generate_summary_plan(&toc).await?;
+
+        // Split the plan into sections (if applicable)
+        let plan_sections: Vec<String> = plan
+            .split("##")
+            .skip(1)
+            .map(|s| format!("##{}", s.trim()))
+            .collect();
+
+        // Progress bar
+        let pb = ProgressBar::new(chapters.len() as u64);
+        let style = ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+            .unwrap()
+            .progress_chars("#>-");
+        pb.set_style(style);
+
+        // Clone output_format for use inside tasks
+        let output_format = args.output_format.clone();
+
+        // Vector to store tasks
+        let mut tasks = Vec::new();
+
+        for (index, chapter) in chapters.into_iter().enumerate() {
+            let summarizer = summarizer.clone();
+            let pb = pb.clone();
+            let chapter_number = index + 1;
+            let chapter_title = toc
+                .get(index)
+                .unwrap_or(&format!("Chapter {}", chapter_number))
+                .clone();
+            let chapter_plan = plan_sections.get(index).cloned().unwrap_or_default();
+
+            // Split the chapter into subsections if necessary
+            let sections = summarizer::split_text_by_tokens(&chapter, 2000);
+
+            let output_format_clone = output_format.clone();
+
+            // Process each subsection in parallel
+            let task = tokio::spawn(async move {
+                let mut chapter_summary = Vec::new();
+                let mut chapter_glossary = Vec::new();
+                let mut chapter_references = Vec::new();
+                for section in sections {
+                    match summarizer
+                        .summarize_with_plan(&section, &chapter_plan)
+                        .await
+                    {
+                        Ok((summary, keywords, glossary, references)) => {
+                            // Highlight keywords
+                            let highlighted_summary =
+                                output::highlight_keywords(&summary, &keywords);
+                            chapter_summary.push(highlighted_summary);
+                            chapter_glossary.extend(glossary);
+                            chapter_references.extend(references);
+                        }
+                        Err(e) => error!("Error summarizing a section: {}", e),
+                    }
                 }
-                state.text_extracted = true;
-                save_state(&state, &state_file)?;
-                chapters
-            } else {
-                epub_handler::extract_text_from_epub(&file)?
-            };
-
-            let total_chapters = chapters.len();
-            let pb = ProgressBar::new(total_chapters as u64);
-            pb.set_style(
-                ProgressStyle::with_template(
-                    "[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ({percent}%) {msg}",
-                )?
-                .progress_chars("##-"),
-            );
-
-            let md_path = output_dir.join("summary.md");
-            let mut md_file = if state.chapters_processed.is_empty() {
-                File::create(&md_path)?
-            } else {
-                fs::OpenOptions::new().append(true).open(&md_path)?
-            };
-
-            let chapter_limit = env::var("CHAPTER_LIMIT")
-                .unwrap_or_else(|_| "10".to_string())
-                .parse()
-                .unwrap_or(10);
-
-            for (i, chapter) in chapters.iter().enumerate() {
-                if state.chapters_processed.contains(&i) {
-                    pb.inc(1);
-                    continue;
-                }
-                pb.set_message("Processing chapters...");
-                pb.set_position(i as u64 + 1);
-
-                let summary = match ai_provider {
-                    "stackspot" => summarize_with_stackspot(&api_key, chapter, &lang_code).await?,
-                    _ => summarize_with_openrouter(&api_key, chapter, &lang_code).await?,
-                };
-                writeln!(
-                    md_file,
-                    "# Chapter {}
-
-{}",
-                    i + 1,
-                    summary
-                )?;
-                state.chapters_processed.push(i);
-                save_state(&state, &state_file)?;
                 pb.inc(1);
+                let combined_summary = chapter_summary.join("\n\n");
 
-                if i + 1 >= chapter_limit {
-                    break;
-                }
-            }
+                // Create the section in the specified format
+                let section_content =
+                    output::format_section(&chapter_title, &combined_summary, &output_format_clone);
+                Ok::<_, anyhow::Error>((section_content, chapter_glossary, chapter_references))
+            });
 
-            pb.finish_with_message("Processing complete");
-
-            if !state.epub_created {
-                println!("Creating EPUB...");
-                create_epub(&output_dir, &md_path)?;
-                state.epub_created = true;
-                save_state(&state, &state_file)?;
-            }
-
-            println!("Pocket book created at {:?}", output_dir);
+            tasks.push(task);
         }
+
+        // Wait for all tasks to complete
+        let results = futures::future::join_all(tasks).await;
+
+        pb.finish_with_message("Summarization completed!");
+
+        // Build the final summary
+        let mut final_summary = output::format_title("E-book Summary", &output_format);
+        let mut final_glossary = Vec::new();
+        let mut final_references = Vec::new();
+
+        for result in results {
+            match result {
+                Ok(Ok((content, glossary, references))) => {
+                    final_summary.push_str(&content);
+                    final_summary.push('\n');
+                    final_glossary.extend(glossary);
+                    final_references.extend(references);
+                }
+                Ok(Err(e)) => error!("Task error: {}", e),
+                Err(e) => error!("Error awaiting task: {}", e),
+            }
+        }
+
+        // Add glossary and references at the end
+        if !final_glossary.is_empty() {
+            let glossary_content = output::format_glossary(&final_glossary, &output_format);
+            final_summary.push_str(&glossary_content);
+        }
+
+        if !final_references.is_empty() {
+            let references_content = output::format_references(&final_references, &output_format);
+            final_summary.push_str(&references_content);
+        }
+
+        // Path to the summary file
+        let summary_path = ebook_output_dir.join(format!("summary.{}", output_format));
+
+        // Save the final summary
+        fs::write(&summary_path, &final_summary)?;
+        println!("Summary saved successfully at {}", summary_path.display());
     }
 
     Ok(())
-}
-
-fn save_state(state: &ProcessingState, state_file: &Path) -> Result<()> {
-    let state_json = serde_json::to_string(state)?;
-    fs::write(state_file, state_json)?;
-    Ok(())
-}
-
-fn validate_file_path(file: &str) -> Result<()> {
-    let path = Path::new(file);
-    if !path.exists() || !path.is_file() {
-        return Err(eyre::eyre!(
-            "The provided file path does not exist or is invalid: {}",
-            file
-        ));
-    }
-    Ok(())
-}
-
-fn get_lang_code(lang: Option<Language>, default: &str) -> &str {
-    match lang {
-        Some(Language::PtBr) => "pt",
-        Some(Language::En) => "en",
-        None => default,
-    }
-}
-
-fn get_ai_provider(provider: Option<AIProvider>, default: &str) -> &str {
-    match provider {
-        Some(AIProvider::StackSpot) => "stackspot",
-        Some(AIProvider::OpenRouter) => "openrouter",
-        None => default,
-    }
 }
