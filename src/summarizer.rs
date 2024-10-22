@@ -26,7 +26,7 @@ impl Summarizer {
     pub async fn generate_summary_plan(&self, toc: &[String]) -> Result<String> {
         let toc_text = toc.join("\n");
         let prompt = format!(
-            "You are an expert in summarizing content. Based on the following table of contents, create a detailed summary plan for this e-book. Focus on the main content and key concepts, and exclude any sections related to the author biography, acknowledgments, prefaces, or any meta-information. Use a direct, note-taking style in {}.\n\nTable of Contents:\n{}",
+            "You are an expert at creating detailed and content-rich summary plans for e-books. Based on the following table of contents, create a comprehensive summary plan that focuses on the main content and key learnings of each chapter. Exclude any sections like dedications, forewords, author biographies, or any meta-information. Include sections for Citations and References, Additional Resources, and any other content that would enrich the summary. Use a direct, note-taking style in {}.\n\nTable of Contents:\n{}",
             self.output_language, toc_text
         );
 
@@ -42,9 +42,9 @@ impl Summarizer {
         &self,
         text: &str,
         plan: &str,
-    ) -> Result<(String, Vec<String>, Vec<String>, Vec<String>)> {
+    ) -> Result<(String, Vec<String>, Vec<String>, Vec<String>, Vec<String>)> {
         let prompt = format!(
-            "Using the following summary plan, summarize the text below. Focus on key points, important insights, and technical terms, using a direct, note-taking style. Avoid phrases like 'the text discusses' or 'this chapter explains'. Do not include sections such as 'About the Author' or any meta-information. The summary should be in {}, and the level of detail should be {}.\n\nSummary Plan:\n{}\n\nText:\n{}",
+            "Using the following summary plan, summarize the text below. Focus on key points, important insights, technical terms, and main learnings. Include sections for Citations and References, Additional Resources, and any other content that would enrich the summary. Use a direct, note-taking style, and avoid phrases like 'the text discusses' or 'this chapter explains'. Do not include sections such as dedications, forewords, or author biographies. The summary should be in {}, and the level of detail should be {}.\n\nSummary Plan:\n{}\n\nText:\n{}",
             self.output_language, self.detail_level, plan, text
         );
 
@@ -55,9 +55,16 @@ impl Summarizer {
 
         let response = self.llm_client.send_request(messages, 0.7).await?;
 
-        // Parse the response to extract summary and keywords
-        let (summary, keywords, _, _) = parse_response(&response);
-        Ok((summary, keywords, Vec::new(), Vec::new()))
+        // Parse the response to extract summary and other sections
+        let (summary, keywords, glossary, references, additional_resources) =
+            parse_response(&response);
+        Ok((
+            summary,
+            keywords,
+            glossary,
+            references,
+            additional_resources,
+        ))
     }
 }
 
@@ -79,12 +86,16 @@ pub fn split_text_by_tokens(text: &str, max_tokens: usize) -> Vec<String> {
     sections
 }
 
-pub fn parse_response(content: &str) -> (String, Vec<String>, Vec<String>, Vec<String>) {
+pub fn parse_response(
+    content: &str,
+) -> (String, Vec<String>, Vec<String>, Vec<String>, Vec<String>) {
     // Split sections by known markers
     let sections: Vec<&str> = content.split("\n\n").collect();
     let mut summary = String::new();
     let mut keywords = Vec::new();
-    // We will skip glossary and references for now
+    let mut glossary = Vec::new();
+    let mut references = Vec::new();
+    let mut additional_resources = Vec::new();
 
     for section in sections {
         if section.starts_with("Keywords:") {
@@ -94,8 +105,26 @@ pub fn parse_response(content: &str) -> (String, Vec<String>, Vec<String>, Vec<S
                 .map(|s| s.trim().to_string())
                 .collect::<Vec<String>>();
             keywords.extend(words);
-        } else if section.starts_with("Glossary:")
+        } else if section.starts_with("Glossary:") {
+            glossary.push(section.trim_start_matches("Glossary:").trim().to_string());
+        } else if section.starts_with("Citations and References:")
             || section.starts_with("References:")
+        {
+            references.push(
+                section
+                    .trim_start_matches("Citations and References:")
+                    .trim()
+                    .to_string(),
+            );
+        } else if section.starts_with("Additional Resources:") {
+            additional_resources.push(
+                section
+                    .trim_start_matches("Additional Resources:")
+                    .trim()
+                    .to_string(),
+            );
+        } else if section.starts_with("Dedication")
+            || section.starts_with("Foreword")
             || section.starts_with("About the Author")
             || section.starts_with("Author Biography")
             || section.starts_with("Preface")
@@ -113,7 +142,8 @@ pub fn parse_response(content: &str) -> (String, Vec<String>, Vec<String>, Vec<S
     (
         summary.trim().to_string(),
         keywords,
-        Vec::new(), // Empty glossary
-        Vec::new(), // Empty references
+        glossary,
+        references,
+        additional_resources,
     )
 }

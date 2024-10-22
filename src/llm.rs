@@ -2,7 +2,7 @@ use anyhow::Result;
 use log::error;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
-use serde_json; // Added import for serde_json
+use serde_json;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -82,11 +82,11 @@ impl LLMClient {
         // Optional headers as per OpenRouter documentation
         headers.insert(
             "X-Title",
-            HeaderValue::from_static("Your App Name"), // Replace with your app name
+            HeaderValue::from_static("AIBook Summarizer"), // Replace with your app name
         );
         headers.insert(
             "HTTP-Referer",
-            HeaderValue::from_static("https://your-site.com"), // Replace with your site URL
+            HeaderValue::from_static("https://github.com/felipepimentel/aibook"), // Replace with your site URL
         );
         Ok(headers)
     }

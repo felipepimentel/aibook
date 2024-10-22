@@ -16,7 +16,7 @@ pub fn highlight_keywords(summary: &str, keywords: &[String]) -> String {
 pub fn format_section(title: &str, content: &str, format: &str) -> String {
     match format {
         "markdown" => format!("## {}\n\n{}\n", title, content),
-        "html" => format!("<h2>{}</h2>\n\n<p>{}</p>\n", title, content),
+        "html" => format!("<h2>{}</h2>\n\n{}\n", title, content),
         _ => content.to_string(),
     }
 }
@@ -32,6 +32,9 @@ pub fn format_title(title: &str, format: &str) -> String {
 
 /// Formats the glossary
 pub fn format_glossary(glossary: &[String], format: &str) -> String {
+    if glossary.is_empty() {
+        return String::new();
+    }
     match format {
         "markdown" => {
             let entries = glossary.join("\n\n");
@@ -51,6 +54,9 @@ pub fn format_glossary(glossary: &[String], format: &str) -> String {
 
 /// Formats the references
 pub fn format_references(references: &[String], format: &str) -> String {
+    if references.is_empty() {
+        return String::new();
+    }
     match format {
         "markdown" => {
             let entries = references.join("\n");
@@ -65,5 +71,27 @@ pub fn format_references(references: &[String], format: &str) -> String {
             format!("<h1>References</h1>\n\n{}\n", entries)
         }
         _ => references.join("\n"),
+    }
+}
+
+/// Formats the additional resources
+pub fn format_additional_resources(resources: &[String], format: &str) -> String {
+    if resources.is_empty() {
+        return String::new();
+    }
+    match format {
+        "markdown" => {
+            let entries = resources.join("\n");
+            format!("# Additional Resources\n\n{}\n", entries)
+        }
+        "html" => {
+            let entries = resources
+                .iter()
+                .map(|entry| format!("<p>{}</p>", entry))
+                .collect::<Vec<String>>()
+                .join("\n");
+            format!("<h1>Additional Resources</h1>\n\n{}\n", entries)
+        }
+        _ => resources.join("\n"),
     }
 }

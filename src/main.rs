@@ -62,19 +62,19 @@ async fn main() -> anyhow::Result<()> {
     };
     env_logger::Builder::from_env(Env::default().default_filter_or(log_level)).init();
 
-    // Get the API key from environment variable or argument
+    // Get the API key from argument or environment variable
     let api_key = args
         .api_key
         .or_else(|| env::var("OPENROUTER_API_KEY").ok())
         .expect("API key not provided");
 
-    // Get the model name from environment variable or argument
+    // Get the model name from argument or environment variable
     let model_name = args
         .model
         .or_else(|| env::var("MODEL_NAME").ok())
         .unwrap_or_else(|| "openai/gpt-3.5-turbo".to_string());
 
-    // Get the output language from environment variable or argument
+    // Get the output language from argument or environment variable
     let output_language = args
         .language
         .or_else(|| env::var("OUTPUT_LANGUAGE").ok())
@@ -102,8 +102,8 @@ async fn main() -> anyhow::Result<()> {
         let images_dir = ebook_output_dir.join("images");
         fs::create_dir_all(&images_dir)?;
 
-        // Read the e-book and get chapters
-        let (doc, chapters) = ebook::read_ebook(&input_path, &images_dir)?;
+        // Read the e-book and get chapters and images
+        let (doc, chapters, chapters_images) = ebook::read_ebook(&input_path, &images_dir)?;
         info!("E-book '{}' read successfully.", input_path.display());
 
         // Extract the table of contents
@@ -139,10 +139,12 @@ async fn main() -> anyhow::Result<()> {
         // Clone output_format for use inside tasks
         let output_format = args.output_format.clone();
 
-        // Vector to store tasks
-        let mut tasks = Vec::new();
+        // Vector to store results
+        let mut results: Vec<
+            Result<(String, Vec<String>, Vec<String>, Vec<String>), anyhow::Error>,
+        > = Vec::new();
 
-        for (index, chapter) in chapters.into_iter().enumerate() {
+        for (index, (chapter, images)) in chapters.into_iter().zip(chapters_images).enumerate() {
             let summarizer = summarizer.clone();
             let pb = pb.clone();
             let chapter_number = index + 1;
@@ -157,41 +159,52 @@ async fn main() -> anyhow::Result<()> {
 
             let output_format_clone = output_format.clone();
 
-            // Process each subsection in parallel
-            let task = tokio::spawn(async move {
-                let mut chapter_summary = Vec::new();
-                let mut chapter_glossary = Vec::new();
-                let mut chapter_references = Vec::new();
-                for section in sections {
-                    match summarizer
-                        .summarize_with_plan(&section, &chapter_plan)
-                        .await
-                    {
-                        Ok((summary, keywords, glossary, references)) => {
-                            // Highlight keywords
-                            let highlighted_summary =
-                                output::highlight_keywords(&summary, &keywords);
-                            chapter_summary.push(highlighted_summary);
-                            chapter_glossary.extend(glossary);
-                            chapter_references.extend(references);
-                        }
-                        Err(e) => error!("Error summarizing a section: {}", e),
+            // Process each subsection sequentially
+            let mut chapter_summary = Vec::new();
+            let mut chapter_glossary = Vec::new();
+            let mut chapter_references = Vec::new();
+            let mut chapter_additional_resources = Vec::new();
+
+            for section in sections {
+                match summarizer
+                    .summarize_with_plan(&section, &chapter_plan)
+                    .await
+                {
+                    Ok((summary, keywords, glossary, references, additional_resources)) => {
+                        // Highlight keywords
+                        let highlighted_summary = output::highlight_keywords(&summary, &keywords);
+                        chapter_summary.push(highlighted_summary);
+                        chapter_glossary.extend(glossary);
+                        chapter_references.extend(references);
+                        chapter_additional_resources.extend(additional_resources);
                     }
+                    Err(e) => error!("Error summarizing a section: {}", e),
                 }
-                pb.inc(1);
-                let combined_summary = chapter_summary.join("\n\n");
+            }
+            pb.inc(1);
+            let combined_summary = chapter_summary.join("\n\n");
 
-                // Create the section in the specified format
-                let section_content =
-                    output::format_section(&chapter_title, &combined_summary, &output_format_clone);
-                Ok::<_, anyhow::Error>((section_content, chapter_glossary, chapter_references))
-            });
+            // Include image references in the markdown
+            let image_markdown = images
+                .iter()
+                .map(|img| format!("![{}]({})", img, format!("images/{}", img)))
+                .collect::<Vec<String>>()
+                .join("\n");
 
-            tasks.push(task);
+            let chapter_content = format!("{}\n\n{}", combined_summary, image_markdown);
+
+            // Create the section in the specified format
+            let section_content =
+                output::format_section(&chapter_title, &chapter_content, &output_format_clone);
+
+            // Store the results
+            results.push(Ok((
+                section_content,
+                chapter_glossary,
+                chapter_references,
+                chapter_additional_resources,
+            )));
         }
-
-        // Wait for all tasks to complete
-        let results = futures::future::join_all(tasks).await;
 
         pb.finish_with_message("Summarization completed!");
 
@@ -199,21 +212,22 @@ async fn main() -> anyhow::Result<()> {
         let mut final_summary = output::format_title("E-book Summary", &output_format);
         let mut final_glossary = Vec::new();
         let mut final_references = Vec::new();
+        let mut final_additional_resources = Vec::new();
 
         for result in results {
             match result {
-                Ok(Ok((content, glossary, references))) => {
+                Ok((content, glossary, references, additional_resources)) => {
                     final_summary.push_str(&content);
                     final_summary.push('\n');
                     final_glossary.extend(glossary);
                     final_references.extend(references);
+                    final_additional_resources.extend(additional_resources);
                 }
-                Ok(Err(e)) => error!("Task error: {}", e),
-                Err(e) => error!("Error awaiting task: {}", e),
+                Err(e) => error!("Task error: {}", e),
             }
         }
 
-        // Add glossary and references at the end
+        // Add glossary, references, and additional resources at the end
         if !final_glossary.is_empty() {
             let glossary_content = output::format_glossary(&final_glossary, &output_format);
             final_summary.push_str(&glossary_content);
@@ -222,6 +236,12 @@ async fn main() -> anyhow::Result<()> {
         if !final_references.is_empty() {
             let references_content = output::format_references(&final_references, &output_format);
             final_summary.push_str(&references_content);
+        }
+
+        if !final_additional_resources.is_empty() {
+            let resources_content =
+                output::format_additional_resources(&final_additional_resources, &output_format);
+            final_summary.push_str(&resources_content);
         }
 
         // Path to the summary file

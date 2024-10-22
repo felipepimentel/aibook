@@ -1,59 +1,177 @@
-# aibook-cli
+# 📖 AIBook
 
-![aibook-cli Banner](https://your-image-url.com/banner.png)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Rust](https://img.shields.io/badge/Language-Rust-orange.svg)](https://www.rust-lang.org/)
+[![Repo](https://img.shields.io/badge/GitHub-Repository-blue?logo=github)](https://github.com/felipepimentel/aibook.git)
 
-**aibook-cli** é uma ferramenta de Linha de Comando (CLI) impulsionada por IA que revoluciona a forma como você consome livros. Transforme livros extensos em versões de bolso concisas e perspicazes com resumos capítulo por capítulo, utilizando tecnologia de IA de ponta e recursos robustos de extração de texto e imagem.
+Welcome to **AIBook**! 🎉 This is a command-line application built in Rust that allows you to generate comprehensive summaries of EPUB e-books using advanced AI language models. With this tool, you can extract the essence of your favorite books, complete with images, references, and additional resources. 🚀
 
-## 🚀 Recursos
+## ✨ Features
 
-- **🧠 Resumo com IA**: Gere resumos detalhados e inteligentes para cada capítulo.
-- **🌐 Suporte Multilíngue**: Processe livros em Inglês e Português Brasileiro.
-- **🔄 Integração Flexível de IA**: Escolha entre os provedores de IA `stackspot` e `openrouter` para resumos.
-- **🖼️ Extração de Imagens**: Preserve o conteúdo visual dos arquivos EPUB para uma experiência de resumo mais rica.
-- **📚 Formatos Duplos de Saída**: Obtenha um arquivo EPUB resumido e um resumo abrangente em markdown.
-- **📊 Acompanhamento de Progresso**: Desfrute de uma experiência do usuário suave com indicadores visuais de progresso durante o processamento.
+- **Detailed Summaries**: Generates in-depth summaries highlighting key points and insights from each chapter.
+- **Image Extraction**: Extracts images from the e-book and includes them in the summary.
+- **References & Resources**: Incorporates citations, references, and additional materials to enrich your understanding.
+- **Customizable Output**: Adjust the level of detail, output language, and format to suit your preferences.
+- **Easy to Use**: Simple command-line interface for quick and efficient summarization.
 
-## 🛠️ Instalação
+## 📋 Table of Contents
 
-### Pré-requisitos
+- [Prerequisites](#-prerequisites)
+- [Installation](#-installation)
+- [Configuration](#-configuration)
+- [Usage](#-usage)
+- [Customization](#-customization)
+- [Contributing](#-contributing)
+- [License](#-license)
+- [Acknowledgments](#-acknowledgments)
+- [Contact](#-contact)
 
-Antes de começar, certifique-se de ter as seguintes ferramentas instaladas:
+## 🛠 Prerequisites
 
-- **Rust**: A espinha dorsal do nosso CLI. Instale em [rustup.rs](https://rustup.rs/)
-- **Cargo**: Vem junto com o Rust - seu gerenciador de pacotes e ferramenta de build
-- **Git**: Para clonar o repositório. Obtenha em [git-scm.com](https://git-scm.com/)
+- **Rust**: Ensure you have Rust installed (version 1.56 or higher). Install it [here](https://www.rust-lang.org/tools/install).
+- **OpenRouter API Key**: Required to access the AI language models. Get yours [here](https://openrouter.ai/).
 
-### Início Rápido
+## 📦 Installation
 
-1. **Clone o Repositório**   ```
-   git clone https://github.com/yourusername/aibook-cli.git
-   cd aibook-cli   ```
+1. **Clone the repository**:
 
-2. **Compile o Projeto**   ```
-   cargo build --release   ```
+   ```bash
+   git clone https://github.com/felipepimentel/aibook.git
+   cd aibook
+   ```
 
-3. **Execute o aibook-cli**   ```
-   ./target/release/aibook-cli   ```
+2. **Build the application**:
 
-## ⚙️ Configuração
+   ```bash
+   cargo build --release
+   ```
 
-1. Crie um arquivo `.env` na raiz do projeto.
-2. Adicione suas chaves de API e configurações padrão:   ```
-   API_KEY=sua_chave_api_aqui
-   DEFAULT_LANGUAGE=ptbr
-   AI_PROVIDER=openrouter   ```
+## ⚙️ Configuration
 
-## 🖥️ Uso
+### API Key
 
-### Comandos
+To use **AIBook**, you need an API key from OpenRouter:
 
-- `process`: Extrai texto de um arquivo EPUB
-- `summarize`: Gera um livro de bolso resumido
+1. Sign up at [OpenRouter](https://openrouter.ai/) and obtain your API key.
+2. Copy the `.env.sample` file to `.env`:
 
-### Opções
+   ```bash
+   cp .env.sample .env
+   ```
 
-- `-f, --file <FILE>`: Especifica o arquivo EPUB de entrada
-- `-l, --lang <LANGUAGE>`: Escolhe o idioma (en/ptbr)
-- `-a, --ai-provider <PROVIDER>`: Seleciona o provedor de IA (stackspot/openrouter)
+3. Open the `.env` file and add your API key:
 
-### Exemplos
+   ```env
+   OPENROUTER_API_KEY=your-api-key-here
+   ```
+
+### Optional Settings
+
+You can define additional settings in the `.env` file:
+
+```env
+# Model to be used (default: openai/gpt-3.5-turbo)
+MODEL_NAME=openai/gpt-3.5-turbo
+
+# Output language of the summary (default: en)
+OUTPUT_LANGUAGE=en
+```
+
+### `.env.sample` File
+
+An example `.env.sample` file is provided in the repository. It contains placeholders for the necessary environment variables. Copy it to create your own `.env` file.
+
+## 🚀 Usage
+
+Run the application by providing the path to the EPUB file you want to summarize:
+
+```bash
+cargo run --release -- --input /path/to/your/ebook.epub
+```
+
+### Available Options
+
+- `--input`: Path(s) to the EPUB file(s).
+- `--output_dir`: Directory where summaries and images will be saved (default: `output/`).
+- `--api_key`: OpenRouter API key (can be set in the `.env` file).
+- `--model`: Language model to be used.
+- `--language`: Output language of the summary (default: `en`).
+- `--detail_level`: Level of detail of the summary (`short`, `medium`, `long`; default: `medium`).
+- `--output_format`: Output format (`markdown`, `html`; default: `markdown`).
+- `--verbose`: Verbosity level of logs (use `-v` for more details).
+
+### Full Example
+
+```bash
+cargo run --release -- \
+  --input /path/to/your/ebook.epub \
+  --output_dir /path/to/output/ \
+  --language en \
+  --detail_level long \
+  --output_format markdown \
+  --verbose
+```
+
+## 🎛 Customization
+
+Feel free to adjust the application's behavior:
+
+- **Custom Prompts**: Modify the prompts in `src/summarizer.rs` to change how the AI model generates summaries.
+- **Source Code**: If you're familiar with Rust, you can adapt the code to your specific needs.
+
+## 🤝 Contributing
+
+Contributions are welcome! If you find a bug or have an idea to improve the project:
+
+1. Open an issue describing the problem or suggestion.
+2. Fork the repository.
+3. Create a new branch for your contribution.
+4. Submit a pull request detailing the changes.
+
+## 📄 License
+
+This project is licensed under the [MIT License](LICENSE).
+
+## 🙏 Acknowledgments
+
+We thank all contributors and users who make this project possible.
+
+## 📫 Contact
+
+For questions or suggestions:
+
+- **Email**: [fpimentel88@gmail.com](mailto:fpimentel88@gmail.com)
+- **GitHub**: [felipepimentel](https://github.com/felipepimentel)
+
+---
+
+We hope that **AIBook** is a useful tool for you to extract the most from your favorite e-books. Happy reading! 📚✨
+
+---
+
+## 📁 `.env.sample` File
+
+Create a `.env.sample` file in the root directory of the repository with the following content:
+
+```env
+# OpenRouter API Key
+OPENROUTER_API_KEY=your-api-key-here
+
+# Model to be used (default: openai/gpt-3.5-turbo)
+# MODEL_NAME=openai/gpt-3.5-turbo
+
+# Output language of the summary (default: en)
+# OUTPUT_LANGUAGE=en
+```
+
+This sample file provides a template for the necessary environment variables. Users can copy this file to `.env` and fill in their own API key and optional settings.
+
+---
+
+**Note:** Ensure that the `.env.sample` file has the `.env.sample` extension and that it is included in your repository. The `.env` file, containing your actual API keys and sensitive information, should not be committed to version control. It's good practice to add `.env` to your `.gitignore` file to prevent accidental commits.
+
+---
+
+By following these steps, you'll have a fully functional **AIBook** application ready to generate summaries of your EPUB e-books. If you have any questions or run into issues, feel free to reach out!
+
+Happy summarizing! 🎉
