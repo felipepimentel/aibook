@@ -3,16 +3,15 @@ use dotenv::dotenv;
 use env_logger::Env;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::{error, info};
+use serde_json::Value;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
 
 mod ebook;
 mod llm;
-mod output;
 mod summarizer;
 
-/// Command-line arguments structure
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -36,7 +35,7 @@ struct Args {
     #[arg(long)]
     language: Option<String>,
 
-    /// Detail level of the summary (short, medium, long)
+    /// Summary detail level (short, medium, long)
     #[arg(long, default_value = "medium")]
     detail_level: String,
 
@@ -54,7 +53,7 @@ async fn main() -> anyhow::Result<()> {
     dotenv().ok();
     let args = Args::parse();
 
-    // Configure logging
+    // Logging configuration
     let log_level = match args.verbose {
         0 => "warn",
         1 => "info",
@@ -62,48 +61,48 @@ async fn main() -> anyhow::Result<()> {
     };
     env_logger::Builder::from_env(Env::default().default_filter_or(log_level)).init();
 
-    // Get the API key from argument or environment variable
+    // Get the API key from the argument or environment variable
     let api_key = args
         .api_key
         .or_else(|| env::var("OPENROUTER_API_KEY").ok())
         .expect("API key not provided");
 
-    // Get the model name from argument or environment variable
+    // Get the model name from the argument or environment variable
     let model_name = args
         .model
         .or_else(|| env::var("MODEL_NAME").ok())
-        .unwrap_or_else(|| "openai/gpt-3.5-turbo".to_string());
+        .unwrap_or_else(|| "openai/gpt-4o-mini".to_string());
 
-    // Get the output language from argument or environment variable
+    // Get the output language from the argument or environment variable
     let output_language = args
         .language
         .or_else(|| env::var("OUTPUT_LANGUAGE").ok())
         .unwrap_or_else(|| "en".to_string());
+
+    // Get the output directory from the argument or environment variable
+    let default_output_dir = env::var("OUTPUT_DIR").unwrap_or_else(|_| "output".to_string());
 
     // Process multiple e-books
     for input_path in &args.input {
         // Determine the output directory for each e-book
         let output_dir = match &args.output_dir {
             Some(path) => path.clone(),
-            None => {
-                let default_output = PathBuf::from("output");
-                default_output
-            }
+            None => PathBuf::from(&default_output_dir),
         };
-        // Create a unique directory for each e-book based on its filename
+        // Create a unique directory for each e-book based on the file name
         let ebook_stem = input_path
             .file_stem()
             .unwrap_or_else(|| input_path.as_os_str())
             .to_string_lossy();
         let ebook_output_dir = output_dir.join(ebook_stem.to_string());
 
-        // Create the output directory and images subdirectory
+        // Create the output directory and the images subdirectory
         fs::create_dir_all(&ebook_output_dir)?;
         let images_dir = ebook_output_dir.join("images");
         fs::create_dir_all(&images_dir)?;
 
         // Read the e-book and get chapters and images
-        let (doc, chapters, chapters_images) = ebook::read_ebook(&input_path, &images_dir)?;
+        let (doc, chapters, _chapters_images) = ebook::read_ebook(&input_path, &images_dir)?;
         info!("E-book '{}' read successfully.", input_path.display());
 
         // Extract the table of contents
@@ -136,120 +135,93 @@ async fn main() -> anyhow::Result<()> {
             .progress_chars("#>-");
         pb.set_style(style);
 
-        // Clone output_format for use inside tasks
-        let output_format = args.output_format.clone();
-
         // Vector to store results
-        let mut results: Vec<
-            Result<(String, Vec<String>, Vec<String>, Vec<String>), anyhow::Error>,
-        > = Vec::new();
+        let mut results: Vec<Value> = Vec::new();
 
-        for (index, (chapter, images)) in chapters.into_iter().zip(chapters_images).enumerate() {
+        for (index, chapter) in chapters.into_iter().enumerate() {
             let summarizer = summarizer.clone();
             let pb = pb.clone();
-            let chapter_number = index + 1;
-            let chapter_title = toc
-                .get(index)
-                .unwrap_or(&format!("Chapter {}", chapter_number))
-                .clone();
             let chapter_plan = plan_sections.get(index).cloned().unwrap_or_default();
-
-            // Split the chapter into subsections if necessary
             let sections = summarizer::split_text_by_tokens(&chapter, 2000);
 
-            let output_format_clone = output_format.clone();
-
-            // Process each subsection sequentially
-            let mut chapter_summary = Vec::new();
-            let mut chapter_glossary = Vec::new();
-            let mut chapter_references = Vec::new();
-            let mut chapter_additional_resources = Vec::new();
+            let mut chapter_result = Value::Null;
 
             for section in sections {
-                match summarizer
-                    .summarize_with_plan(&section, &chapter_plan)
-                    .await
-                {
-                    Ok((summary, keywords, glossary, references, additional_resources)) => {
-                        // Highlight keywords
-                        let highlighted_summary = output::highlight_keywords(&summary, &keywords);
-                        chapter_summary.push(highlighted_summary);
-                        chapter_glossary.extend(glossary);
-                        chapter_references.extend(references);
-                        chapter_additional_resources.extend(additional_resources);
+                let section = section.to_string(); // Convert &str to String
+                let mut attempt = 0;
+                let max_attempts = 3; // Try up to 3 times
+
+                while attempt < max_attempts {
+                    match summarizer
+                        .summarize_with_plan(&section, &chapter_plan)
+                        .await
+                    {
+                        Ok(result) => {
+                            chapter_result = result;
+                            break; // Exit the loop if the response is successful
+                        }
+                        Err(e) => {
+                            error!("Error summarizing a section: {}", e);
+                            attempt += 1;
+
+                            if attempt == max_attempts {
+                                error!("Maximum number of attempts reached. Skipping the section.");
+                            }
+                        }
                     }
-                    Err(e) => error!("Error summarizing a section: {}", e),
                 }
             }
+
             pb.inc(1);
-            let combined_summary = chapter_summary.join("\n\n");
-
-            // Include image references in the markdown
-            let image_markdown = images
-                .iter()
-                .map(|img| format!("![{}]({})", img, format!("images/{}", img)))
-                .collect::<Vec<String>>()
-                .join("\n");
-
-            let chapter_content = format!("{}\n\n{}", combined_summary, image_markdown);
-
-            // Create the section in the specified format
-            let section_content =
-                output::format_section(&chapter_title, &chapter_content, &output_format_clone);
-
-            // Store the results
-            results.push(Ok((
-                section_content,
-                chapter_glossary,
-                chapter_references,
-                chapter_additional_resources,
-            )));
+            results.push(chapter_result);
         }
 
         pb.finish_with_message("Summarization completed!");
 
         // Build the final summary
-        let mut final_summary = output::format_title("E-book Summary", &output_format);
-        let mut final_glossary = Vec::new();
-        let mut final_references = Vec::new();
-        let mut final_additional_resources = Vec::new();
+        let mut final_summary = String::new();
 
         for result in results {
-            match result {
-                Ok((content, glossary, references, additional_resources)) => {
-                    final_summary.push_str(&content);
-                    final_summary.push('\n');
-                    final_glossary.extend(glossary);
-                    final_references.extend(references);
-                    final_additional_resources.extend(additional_resources);
+            if let Some(summary) = result.get("summary").and_then(Value::as_str) {
+                final_summary.push_str(summary);
+                final_summary.push('\n');
+            }
+
+            if let Some(keywords) = result.get("keywords").and_then(Value::as_array) {
+                final_summary.push_str("\n## Keywords\n");
+                for keyword in keywords {
+                    final_summary.push_str(&format!("- {}\n", keyword));
                 }
-                Err(e) => error!("Task error: {}", e),
+            }
+
+            if let Some(glossary) = result.get("glossary").and_then(Value::as_array) {
+                final_summary.push_str("\n## Glossary\n");
+                for term in glossary {
+                    final_summary.push_str(&format!("- {}\n", term));
+                }
+            }
+
+            if let Some(references) = result.get("references").and_then(Value::as_array) {
+                final_summary.push_str("\n## References\n");
+                for reference in references {
+                    final_summary.push_str(&format!("- {}\n", reference));
+                }
+            }
+
+            if let Some(resources) = result.get("additional_resources").and_then(Value::as_array) {
+                final_summary.push_str("\n## Additional Resources\n");
+                for resource in resources {
+                    final_summary.push_str(&format!("- {}\n", resource));
+                }
             }
         }
 
-        // Add glossary, references, and additional resources at the end
-        if !final_glossary.is_empty() {
-            let glossary_content = output::format_glossary(&final_glossary, &output_format);
-            final_summary.push_str(&glossary_content);
-        }
-
-        if !final_references.is_empty() {
-            let references_content = output::format_references(&final_references, &output_format);
-            final_summary.push_str(&references_content);
-        }
-
-        if !final_additional_resources.is_empty() {
-            let resources_content =
-                output::format_additional_resources(&final_additional_resources, &output_format);
-            final_summary.push_str(&resources_content);
-        }
-
         // Path to the summary file
-        let summary_path = ebook_output_dir.join(format!("summary.{}", output_format));
+        let summary_path = ebook_output_dir.join(format!("summary.{}", args.output_format));
 
         // Save the final summary
-        fs::write(&summary_path, &final_summary)?;
-        println!("Summary saved successfully at {}", summary_path.display());
+        fs::write(&summary_path, final_summary)?;
+        println!("Summary successfully saved to {}", summary_path.display());
     }
 
     Ok(())
