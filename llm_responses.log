@@ -1,31 +1,48 @@
-[2024-10-24T17:28:24.751576324+00:00] Context: summary_plan
+[2024-10-24T17:29:18.790107465+00:00] Context: detailed_summary
 Response:
 ```json
 {
-    "summary": "Este e-book explora o conceito de APIOps e suas aplicações práticas na automação da entrega de APIs. Através de capítulos que abordam desde a definição de APIOps até técnicas específicas como linting de APIs, verificação de mudanças, revisão de design e conformidade de APIs, o livro oferece uma abordagem detalhada para melhorar a consistência e a governança das APIs. O conteúdo também inclui práticas de CI/CD para artefatos de API e métodos de monitoramento e análise para medir métricas de produtos de API. Com apêndices que fornecem informações sobre ferramentas e técnicas adicionais, este guia é essencial para profissionais que buscam otimizar o ciclo de vida de suas APIs.",
-    "keywords": [
-        "APIOps",
-        "automação de APIs",
-        "linting de APIs",
-        "CI/CD",
-        "conformidade de APIs",
-        "monitoramento de APIs"
-    ],
-    "glossary": [
-        "APIOps: Abordagem DevOps aplicada ao ciclo de vida das APIs.",
-        "Linting: Processo de verificar a conformidade de código com regras predefinidas.",
-        "CI/CD: Integração Contínua e Entrega Contínua, práticas que automatizam o desenvolvimento e a entrega de software.",
-        "Conformidade: Garantia de que as APIs atendem a especificações e padrões definidos.",
-        "Monitoramento: Processo de coletar e analisar dados de desempenho das APIs."
-    ],
-    "references": [
-        "API Design Guide",
-        "Continuous Delivery: Reliable Software Releases through Build, Test, and Deployment Automation"
-    ],
-    "additional_resources": [
-        "API Linting Tools",
-        "OpenAPI Specification"
-    ]
+    "summary": "O texto aborda conceitos fundamentais sobre a estrutura organizacional, enfatizando a importância da comunicação efetiva e a definição clara de papéis dentro de uma equipe. Discutem-se as relações hierárquicas e a dinâmica de grupo, bem como estratégias para otimizar a colaboração e a produtividade. Além disso, são apresentados métodos para avaliar o desempenho organizacional e a necessidade de adaptação às mudanças do mercado.",
+    "keywords": ["estrutura organizacional", "comunicação", "papéis", "dinâmica de grupo", "produtividade"],
+    "glossary": ["estrutura organizacional", "dinâmica de grupo", "desempenho organizacional"],
+    "references": ["chapter-2.xhtml", "chapter-3.xhtml", "chapter-4.xhtml"],
+    "additional_resources": ["artigos sobre comunicação organizacional", "livros sobre gestão de equipes"]
+}
+```
+
+[2024-10-24T17:29:18.790265494+00:00] Context: invalid_json
+Response:
+```json
+{
+    "summary": "O texto aborda conceitos fundamentais sobre a estrutura organizacional, enfatizando a importância da comunicação efetiva e a definição clara de papéis dentro de uma equipe. Discutem-se as relações hierárquicas e a dinâmica de grupo, bem como estratégias para otimizar a colaboração e a produtividade. Além disso, são apresentados métodos para avaliar o desempenho organizacional e a necessidade de adaptação às mudanças do mercado.",
+    "keywords": ["estrutura organizacional", "comunicação", "papéis", "dinâmica de grupo", "produtividade"],
+    "glossary": ["estrutura organizacional", "dinâmica de grupo", "desempenho organizacional"],
+    "references": ["chapter-2.xhtml", "chapter-3.xhtml", "chapter-4.xhtml"],
+    "additional_resources": ["artigos sobre comunicação organizacional", "livros sobre gestão de equipes"]
+}
+```
+
+[2024-10-24T17:29:24.952994835+00:00] Context: detailed_summary
+Response:
+```json
+{
+    "summary": "O texto aborda temas centrais sobre práticas e teorias em diversas áreas, enfatizando métodos de pesquisa, análise crítica e a importância da aplicação prática do conhecimento. Cada capítulo explora um aspecto diferente, desde fundamentos teóricos até estudos de caso práticos, fornecendo uma visão abrangente sobre como aplicar conceitos em cenários reais. O autor destaca a interconexão entre teoria e prática, incentivando a reflexão crítica e a adaptação de métodos às necessidades específicas do contexto.",
+    "keywords": ["práticas", "teorias", "métodos de pesquisa", "análise crítica", "aplicação prática"],
+    "glossary": ["fundamentos", "estudos de caso", "reflexão crítica", "contexto"],
+    "references": ["chapter-2", "chapter-3", "chapter-4", "chapter-5", "chapter-6", "chapter-7", "chapter-8", "chapter-9", "chapter-10"],
+    "additional_resources": ["artigos acadêmicos", "livros sobre metodologia", "ferramentas de análise"]
+}
+```
+
+[2024-10-24T17:29:24.953041204+00:00] Context: invalid_json
+Response:
+```json
+{
+    "summary": "O texto aborda temas centrais sobre práticas e teorias em diversas áreas, enfatizando métodos de pesquisa, análise crítica e a importância da aplicação prática do conhecimento. Cada capítulo explora um aspecto diferente, desde fundamentos teóricos até estudos de caso práticos, fornecendo uma visão abrangente sobre como aplicar conceitos em cenários reais. O autor destaca a interconexão entre teoria e prática, incentivando a reflexão crítica e a adaptação de métodos às necessidades específicas do contexto.",
+    "keywords": ["práticas", "teorias", "métodos de pesquisa", "análise crítica", "aplicação prática"],
+    "glossary": ["fundamentos", "estudos de caso", "reflexão crítica", "contexto"],
+    "references": ["chapter-2", "chapter-3", "chapter-4", "chapter-5", "chapter-6", "chapter-7", "chapter-8", "chapter-9", "chapter-10"],
+    "additional_resources": ["artigos acadêmicos", "livros sobre metodologia", "ferramentas de análise"]
 }
 ```
 

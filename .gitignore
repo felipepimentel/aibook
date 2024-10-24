@@ -25,3 +25,5 @@ target
 book2test
 
 output/
+
+llm_responses.log
