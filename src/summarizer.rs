@@ -4,6 +4,7 @@ use chrono::Utc;
 use serde_json::Value;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::path::PathBuf;
 use tiktoken_rs::cl100k_base;
 
 #[derive(Clone)]
@@ -11,26 +12,7 @@ pub struct Summarizer {
     pub llm_client: LLMClient,
     pub output_language: String,
     pub detail_level: String,
-}
-
-pub fn split_text_by_tokens(text: &str, max_tokens: usize) -> Vec<String> {
-    // Initialize the BPE encoder to count tokens
-    let bpe = cl100k_base().unwrap();
-    let tokens = bpe.encode_with_special_tokens(text);
-
-    let mut sections = Vec::new();
-    let mut start = 0;
-
-    // Iterate over the tokens, creating sections that do not exceed the maximum number of tokens
-    while start < tokens.len() {
-        let end = usize::min(start + max_tokens, tokens.len());
-        let section_tokens = &tokens[start..end];
-        let section_text = bpe.decode(section_tokens.to_vec()).unwrap();
-        sections.push(section_text);
-        start = end;
-    }
-
-    sections
+    pub log_dir: PathBuf, // Directory for logs
 }
 
 impl Summarizer {
@@ -40,10 +22,14 @@ impl Summarizer {
         output_language: String,
         detail_level: String,
     ) -> Self {
+        let log_dir = PathBuf::from("logs"); // Create log directory
+        fs::create_dir_all(&log_dir).expect("Failed to create log directory");
+
         Summarizer {
             llm_client: LLMClient::new(api_key, model_name),
             output_language,
             detail_level,
+            log_dir,
         }
     }
 
@@ -63,8 +49,9 @@ impl Summarizer {
 
         let response = self.llm_client.send_request(messages, 0.7).await?;
 
-        // Log the response to a file
-        self.log_llm_response(&response, "summary_plan")?;
+        // Log raw response
+        self.log_llm_response(&response, "summary_plan", "received")
+            .await?;
 
         if response.trim().is_empty() {
             return Err(anyhow!("LLM returned an empty response."));
@@ -89,42 +76,83 @@ impl Summarizer {
 
         let response = self.llm_client.send_request(messages, 0.7).await?;
 
-        // Log the response to a file
-        self.log_llm_response(&response, "detailed_summary")?;
+        // Log raw response
+        self.log_llm_response(&response, "detailed_summary", "received")
+            .await?;
 
-        // Check if the response is empty
-        if response.trim().is_empty() {
+        // Clean up markdown and other unwanted characters from the LLM response
+        let cleaned_response = self.clean_response(&response);
+
+        // Stop execution if the response is empty
+        if cleaned_response.trim().is_empty() {
             return Err(anyhow!("LLM returned an empty response."));
         }
 
-        // Validate if the JSON is valid
-        match serde_json::from_str::<Value>(&response) {
-            Ok(parsed_response) => Ok(parsed_response),
-            Err(_) => {
-                self.log_llm_response(&response, "invalid_json")?;
-                Err(anyhow!(
-                    "Failed to parse JSON response from LLM: {}",
-                    response
-                ))
+        // Try to parse the JSON and stop the program if parsing fails
+        match serde_json::from_str::<Value>(&cleaned_response) {
+            Ok(parsed_response) => {
+                // Log successful transformation
+                self.log_llm_response(&cleaned_response, "detailed_summary", "parsed")
+                    .await?;
+                Ok(parsed_response)
+            }
+            Err(e) => {
+                // Log the invalid JSON response
+                self.log_llm_response(&cleaned_response, "detailed_summary", "invalid_json")
+                    .await?;
+                println!(
+                    "Critical error parsing LLM response: {}\nResponse: {}",
+                    e, cleaned_response
+                );
+                std::process::exit(1); // Stop the program immediately
             }
         }
     }
 
-    // Helper function to log LLM responses to a file
-    fn log_llm_response(&self, response: &str, context: &str) -> Result<()> {
+    // Log LLM responses in log files under the logs directory
+    async fn log_llm_response(&self, response: &str, context: &str, status: &str) -> Result<()> {
+        let timestamp = Utc::now().to_rfc3339();
+        let log_file_path = self.log_dir.join(format!("llm_{}.log", context));
+
         let mut file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open("llm_responses.log")?;
+            .open(&log_file_path)?;
 
         writeln!(
             file,
-            "[{}] Context: {}\nResponse:\n{}\n",
-            Utc::now().to_rfc3339(),
-            context,
-            response
+            "[{}] Context: {}\nStatus: {}\nResponse:\n{}\n",
+            timestamp, context, status, response
         )?;
 
         Ok(())
+    }
+
+    // Clean response from unwanted characters like backticks or JSON markdown
+    fn clean_response(&self, response: &str) -> String {
+        response
+            .trim()
+            .trim_start_matches("```json")
+            .trim_end_matches("```")
+            .to_string()
+    }
+
+    // Function to split text into sections based on token count
+    pub fn split_text_by_tokens(&self, text: &str, max_tokens: usize) -> Vec<String> {
+        let bpe = cl100k_base().unwrap();
+        let tokens = bpe.encode_with_special_tokens(text);
+
+        let mut sections = Vec::new();
+        let mut start = 0;
+
+        while start < tokens.len() {
+            let end = usize::min(start + max_tokens, tokens.len());
+            let section_tokens = &tokens[start..end];
+            let section_text = bpe.decode(section_tokens.to_vec()).unwrap();
+            sections.push(section_text);
+            start = end;
+        }
+
+        sections
     }
 }

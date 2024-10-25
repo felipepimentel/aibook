@@ -99,7 +99,7 @@ struct OpenRouterRequest {
     temperature: f32,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,

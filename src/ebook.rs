@@ -11,7 +11,12 @@ use std::path::{Path, PathBuf};
 pub fn read_ebook<P: AsRef<Path>>(
     path: P,
     images_dir: &Path,
-) -> Result<(EpubDoc<BufReader<File>>, Vec<String>, Vec<Vec<String>>)> {
+) -> Result<(
+    EpubDoc<BufReader<File>>,
+    Vec<String>,
+    Vec<Vec<String>>,
+    HashMap<String, String>,
+)> {
     let file = File::open(&path)?;
     let buf_reader = BufReader::new(file);
 
@@ -47,7 +52,9 @@ pub fn read_ebook<P: AsRef<Path>>(
         doc.go_next();
     }
 
-    Ok((doc, chapters_content, chapters_images))
+    let metadata = get_ebook_metadata(&doc);
+
+    Ok((doc, chapters_content, chapters_images, metadata))
 }
 
 /// Extracts the table of contents from the e-book
@@ -122,4 +129,21 @@ fn extract_images<R: std::io::Read + std::io::Seek>(
     }
 
     Ok(image_map)
+}
+
+// Add a function to get metadata from the e-book
+pub fn get_ebook_metadata<R: std::io::Read + std::io::Seek>(
+    doc: &EpubDoc<R>,
+) -> HashMap<String, String> {
+    let mut metadata = HashMap::new();
+    if let Some(title) = doc.mdata("title") {
+        metadata.insert("title".to_string(), title);
+    }
+    if let Some(author) = doc.mdata("creator") {
+        metadata.insert("author".to_string(), author);
+    }
+    if let Some(language) = doc.mdata("language") {
+        metadata.insert("language".to_string(), language);
+    }
+    metadata
 }
